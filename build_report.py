@@ -60,57 +60,55 @@ def excluded(text):
     t=(text or '').lower()
     return any(h in t for h in EXCLUDE_HINTS)
 
-def load_data(xlsx_path):
-    wb=load_workbook(xlsx_path, data_only=True)
-    names=wb.sheetnames
-    SC={}
-    if 'Service Calls' in names:
-        for r in list(wb['Service Calls'].iter_rows(values_only=True))[1:]:
-            if r[0] is None: continue
-            d=r[7]
-            if isinstance(d,str):
-                try: d=datetime.strptime(d[:10],'%Y-%m-%d')
-                except: d=None
-            SC[str(r[0])]=dict(listing=r[2],desc=r[3],status=r[4],date=d,contractor=r[6],
-                               mat=float(r[9] or 0),labor=float(r[10] or 0))
-    S1={}
-    sheet1 = 'Sheet1' if 'Sheet1' in names else names[-1]
-    for r in list(wb[sheet1].iter_rows(values_only=True))[1:]:
-        url=str(r[16] or ''); m=re.search(r'(\d{6,})',url)
-        if not m: continue
-        S1[m.group(1)]=dict(cat2=(r[1] or '').strip(),cat3=(r[2] or '').strip(),
-            contractor=(r[3] or '').strip(),listing=(r[4] or '').strip(),city=(r[6] or '').strip(),
-            area=(r[7] or '').strip(),internal=float(r[9] or 0),external=float(r[10] or 0),
-            extflag=(r[11] or ''),admin=float(r[12] or 0),material=float(r[13] or 0),
-            total=float(r[14] or 0),raiser=(r[17] or '').strip())
-    # Build the request set. Prefer Service Calls (real dates+status); enrich from Sheet1.
-    recs=[]
-    src = SC if SC else {tid:dict(listing=b['listing'],desc=b['cat2'],status='Done',date=None,
-                                  contractor=b['contractor'],mat=b['material'],labor=b['internal']) for tid,b in S1.items()}
-    for tid,sv in src.items():
-        b=S1.get(tid)
-        if excluded((b['cat2'] if b else '')+' '+(b['cat3'] if b else '')+' '+(sv.get('desc') or '')):
+def _norm(s): return (str(s).strip().lower() if s is not None else '')
+
+NEWTYPE_TO_CAT = {
+    'plumbing':'سباكة','preventive maintenance':'صيانة دورية','maintenance _ electricity':'كهرباء',
+    'maintenance _ ac':'تكييف',"the internet isn't working.":'إنترنت','smart key':'أقفال ذكية',
+    'maintenance':'صيانة عامة','delivery':'خدمات توصيل','maintenance _ fit-out':'تشطيبات',
+    'change batteries':'بطاريات','parking maintenance':'مواقف سيارات','door maintenance':'أبواب ونوافذ',
+    'furniture repair':'أثاث','maintenance of electrical appliances':'أجهزة كهربائية','bad smell':'روائح',
+    'paint':'دهانات','service':'خدمة','maintenance _ curtains':'ستائر','customers needs':'احتياجات العملاء',
+    'electric perfume dispensers':'معطرات','pest control':'مكافحة حشرات',
+}
+
+def load_data(xlsx_path, start=None, end=None):
+    """يقرأ الصيغة الجديدة (ورقة واحدة) ويُرجع السجلات مع كائن التاريخ.
+    start/end (datetime) لفلترة الفترة. إن كانت None تُرجع الكل."""
+    wb = load_workbook(xlsx_path, data_only=True)
+    name = 'Sheet1' if 'Sheet1' in wb.sheetnames else wb.sheetnames[0]
+    ws = wb[name]
+    recs = []
+    for r in list(ws.iter_rows(values_only=True))[1:]:
+        if r is None or r[0] is None:
             continue
-        status=(sv.get('status') or 'Done')
-        # only DONE / In Review (= Pending Approval)
-        if status not in ('Done','In Review','Pending Approval'): continue
-        if b:
-            internal,external,admin,material=b['internal'],b['external'],b['admin'],b['material']
-            cat=map_cat(b['cat2'],b['cat3']); city=map_city(b['city'],b['area'])
-            raiser=b['raiser'] or 'AI'; listing=(b['listing'] or sv.get('listing') or '').strip()
-            desc=b['cat2'] or sv.get('desc')
-        else:
-            internal=float(sv.get('labor') or 0); external=0.0; admin=0.0; material=float(sv.get('mat') or 0)
-            cat=map_cat(sv.get('desc'),sv.get('desc')); city=map_city(None,sv.get('listing'))
-            raiser='AI'; listing=(sv.get('listing') or '').strip(); desc=sv.get('desc')
-        if not raiser or raiser.lower() in ('','none','غير محدد'): raiser='AI'
-        d=sv.get('date') or datetime(2000,1,1)
-        total=internal+external+admin+material
-        recs.append(dict(id=tid,listing=listing or '—',cat=cat,city=city,
-            internal=round(internal,2),external=round(external,2),admin=round(admin,2),
-            material=round(material,2),total=round(total,2),raiser=raiser,contractor=sv.get('contractor') or '',
-            status=status,date=d.strftime('%Y-%m-%d'),dow=AR_DAYS[d.weekday()],day=d.day,month=d.month,desc=desc))
-    recs.sort(key=lambda x:(x['date'],x['id']))
+        d = r[0]
+        if isinstance(d, str):
+            try: d = datetime.strptime(d[:10], '%Y-%m-%d')
+            except: continue
+        if not isinstance(d, datetime):
+            continue
+        if start and d < start: continue
+        if end and d > end: continue
+        mtype = _norm(r[1])
+        cat = NEWTYPE_TO_CAT.get(mtype, 'صيانة عامة')
+        city = 'المدينة' if 'madinah' in _norm(r[6]) or 'madina' in _norm(r[6]) else 'الرياض'
+        def num(x):
+            try: return float(x or 0)
+            except: return 0.0
+        internal=num(r[9]); external=num(r[10]); admin=num(r[12]); material=num(r[13])
+        total = num(r[14]) or (internal+external+admin+material)
+        raiser = (str(r[17]).strip() if r[17] else 'AI')
+        if not raiser or raiser.lower() in ('','none','undefined','غير محدد'): raiser='AI'
+        recs.append(dict(
+            id='', listing=(str(r[4]).strip() if r[4] else (str(r[5]).strip() if r[5] else '—')),
+            cat=cat, city=city,
+            internal=round(internal,2), external=round(external,2),
+            admin=round(admin,2), material=round(material,2), total=round(total,2),
+            raiser=raiser, contractor=(str(r[3]).strip() if r[3] else ''),
+            status='Done', date=d.strftime('%Y-%m-%d'),
+            dow=AR_DAYS[d.weekday()], day=d.day, month=d.month, desc=(str(r[1]).strip() if r[1] else '')))
+    recs.sort(key=lambda x:(x['date'], x['id']))
     return recs
 
 def f(x):
@@ -400,23 +398,48 @@ PAGE_TMPL = """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF
 <div class="foot">ناصع لخدمات الصيانة · تقرير آلي · آخر تحديث {GEN}</div>
 </div>{SCRIPT}</body></html>"""
 
+def _summary(recs):
+    N=len(recs)
+    S=lambda k: round(sum(r[k] for r in recs),2)
+    return dict(n=N, internal=S('internal'), external=S('external'),
+                labor=round(S('internal')+S('external'),2),
+                material=S('material'), admin=S('admin'), total=S('total'))
+
 def main():
+    # Usage: python build_report.py <input.xlsx> <output_dir> [start YYYY-MM-DD] [end YYYY-MM-DD]
     if len(sys.argv)<3:
-        print("Usage: python build_report.py <input.xlsx> <output_dir>"); sys.exit(1)
+        print("Usage: python build_report.py <input.xlsx> <output_dir> [start] [end]"); sys.exit(1)
     xlsx, outdir = sys.argv[1], sys.argv[2]
+    start = end = None
+    # explicit args take priority, else read period.txt if present
+    if len(sys.argv)>=5:
+        start=datetime.strptime(sys.argv[3],'%Y-%m-%d'); end=datetime.strptime(sys.argv[4],'%Y-%m-%d')
+    else:
+        pf=os.path.join(os.path.dirname(os.path.abspath(xlsx)),'period.txt')
+        pf2='period.txt'
+        for cand in (pf,pf2):
+            if os.path.exists(cand):
+                lines=[l.strip() for l in open(cand,encoding='utf-8') if l.strip()]
+                if len(lines)>=2:
+                    start=datetime.strptime(lines[0][:10],'%Y-%m-%d'); end=datetime.strptime(lines[1][:10],'%Y-%m-%d')
+                break
     os.makedirs(outdir, exist_ok=True)
-    prev_path=os.path.join(outdir,'prev_summary.json')
+    recs=load_data(xlsx, start, end)
+    # comparison: previous equal-length window from the SAME file
     prev=None
-    if os.path.exists(prev_path):
-        try: prev=json.load(open(prev_path,encoding='utf-8'))
-        except: prev=None
-    recs=load_data(xlsx)
+    if start and end:
+        length=(end-start).days+1
+        pend=start-timedelta(days=1); pstart=pend-timedelta(days=length-1)
+        precs=load_data(xlsx, pstart, pend)
+        if precs:
+            ps=_summary(precs)
+            ps['period']=f"{pstart.day}–{pend.day} {AR_MONTHS[pend.month]}"
+            prev=ps
     if not recs:
-        print("WARNING: no qualifying records found."); 
+        print("WARNING: no records in range.")
     html, snap = build_html(recs, prev)
     open(os.path.join(outdir,'index.html'),'w',encoding='utf-8').write(html)
-    json.dump(snap, open(prev_path,'w',encoding='utf-8'), ensure_ascii=False, indent=1)
-    print(f"OK — wrote {os.path.join(outdir,'index.html')} ({len(recs)} records, total SAR {snap['total']:,.2f})")
+    print(f"OK — {len(recs)} records"+(f", prev {prev['n']}" if prev else ", no prev"))
 
 if __name__=='__main__':
     main()
