@@ -621,6 +621,10 @@ const MEDIA = {
 </script>
 <script>(function () {
   const J = D.jul, N = D.jun;
+  // aliases for sections that reference D.top / D.julTasks directly
+  if (!D.top) D.top = J.top;
+  if (!D.julTasks) D.julTasks = J.top;
+
   const MINT = '#6EEBA3', GREEN = '#12B36A', SKY = '#2AA7E0', PREV = '#5B8DEF',
         MAT = '#C97B3C', EXT = '#E5A33B', DIM = '#93AAB8';
   const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -996,7 +1000,7 @@ const MEDIA = {
     const n = D.top.length;
     const head = words[n] || ('أعلى ' + n + ' طلباً');
     const share = D.top.reduce((a, t) => a + t.rev, 0) / J.rev * 100;
-    el('jobsLede').innerHTML = head + ' من حيث إجمالي التكلفة في يوليو، بكل بنودها مفصّلة — ' +
+    el('jobsLede').innerHTML = head + ' من حيث إجمالي التكلفة، بكل بنودها مفصّلة — ' +
       'تمثل مجتمعة <b>' + share.toFixed(0) + '%</b> من تكلفة الشهر.';
   })();
 
@@ -1158,25 +1162,20 @@ const MEDIA = {
     const top = J.proj[0], topCat = J.cat[0], topEmp = J.emp[0];
     const deliv = J.cat.find(c => c.k === 'توريد وتوصيل') || { n: 0, rev: 0, mat: 0 };
     el('readout').innerHTML = [
-      '<b>الشهر بدا ممتازاً ولم يكن كذلك.</b> إجمالي التكلفة ارتفع ' + pc(J.rev, N.rev).toFixed(0) + '% إلى ' +
-      nf2(J.rev) + ' ريال، لكن مجموع العمالة الداخلية والخارجية ورسوم الإدارة نزل ' +
-      Math.abs(pc(J.net, N.net)).toFixed(0) + '% إلى ' + nf2(J.net) + ' ريال.',
-      '<b>العمالة الداخلية تقلّصت للنصف تقريباً:</b> من ' + nf(N.lab) + ' إلى ' + nf(J.lab) +
-      ' ريال، بينما ساعات العمل انخفضت بنسبة أقل (' + N.hours + ' إلى ' + J.hours + ' ساعة).',
-      '<b>التوريد ابتلع الشهر:</b> ' + deliv.n + ' طلب توريد بإجمالي تكلفة ' + nf2(deliv.rev) + ' ريال، منها ' +
-      nf2(deliv.mat) + ' ريال مواد — أي ' + (deliv.rev / J.rev * 100).toFixed(0) + '% من الشهر من ' +
-      (deliv.n / J.n * 100).toFixed(0) + '% من الطلبات فقط.',
-      '<b>الحجم التشغيلي تراجع:</b> ' + J.n + ' طلباً مقابل ' + N.n + ' في يونيو، والوحدات المخدومة نزلت من ' +
-      N.units + ' إلى ' + J.units + ' وحدة.',
-      '<b>أكثر التصنيفات تكراراً:</b> ' + topCat.k + ' بـ ' + topCat.n + ' طلباً، ثم ' + J.cat[1].k + ' بـ ' + J.cat[1].n + '.',
-      '<b>أعلى الفنيين حجماً:</b> ' + topEmp.k + ' بـ ' + topEmp.n + ' طلباً و' + hrs(topEmp.mins) + ' ساعة.',
-      '<b>الطلبات بدون تكلفة ارتفعت</b> من ' + N.zero + ' في يونيو إلى ' + J.zero + ' في يوليو.',
+      '<b>الشهر بدا ممتازاً ولم يكن كذلك.</b> إجمالي التكلفة ' + (pc(J.rev,N.rev)>=0?'ارتفع':'انخفض') + ' ' + Math.abs(pc(J.rev,N.rev)).toFixed(0) + '% إلى ' +
+      nf2(J.rev) + ' ريال، لكن مجموع العمالة الداخلية والخارجية ورسوم الإدارة ' + (pc(J.net,N.net)>=0?'ارتفع':'انخفض') + ' ' +
+      Math.abs(pc(J.net,N.net)).toFixed(0) + '% إلى ' + nf2(J.net) + ' ريال.',
+      '<b>العمالة الداخلية انخفضت</b> من ' + nf(N.lab) + ' إلى ' + nf(J.lab) + ' ريال.',
+      '<b>الحجم التشغيلي:</b> ' + J.n + ' طلباً مقابل ' + N.n + ' في الشهر السابق. الوحدات المخدومة ' +
+      (J.units >= N.units ? 'ارتفعت' : 'انخفضت') + ' من ' + N.units + ' إلى ' + J.units + ' وحدة.',
+      '<b>أكثر التصنيفات تكراراً:</b> ' + topCat.k + ' بـ ' + topCat.n + ' طلباً، ثم ' + J.cat[1].k + ' بـ ' + J.cat[1].n + ' طلباً.',
+      '<b>مشروع عطرة</b> استحوذ على ' + (top.rev / J.rev * 100).toFixed(0) + '% من تكلفة الشهر بمبلغ ' + S2(top.rev) + ' ريال عبر ' + top.n + ' طلباً.',
+      '<b>أعلى الفنيين حجماً:</b> ' + topEmp.k + ' بـ ' + topEmp.n + ' طلباً.',
+      '<b>الطلبات بدون تكلفة ارتفعت</b> من ' + N.zero + ' في الشهر السابق إلى ' + J.zero + ' هذا الشهر.',
     ].map(x => '<li>' + x + '</li>').join('');
 
     el('issues').innerHTML = [
-      '<b>حصة المواد قفزت من ' + (N.mat / N.rev * 100).toFixed(0) + '% إلى ' + (J.mat / J.rev * 100).toFixed(0) +
-      '% من إجمالي التكلفة.</b> لو تكرر شهرين متتاليين، يتحوّل القسم عملياً إلى وسيط شراء مواد بدل مزوّد خدمة صيانة.',
-      '<b>تركّز ' + (top.rev / J.rev * 100).toFixed(0) + '% من تكلفة الشهر في مشروع ' + top.k + '</b> — ' +
+            '<b>تركّز ' + (top.rev / J.rev * 100).toFixed(0) + '% من تكلفة الشهر في مشروع ' + top.k + '</b> — ' +
       S2(top.rev) + ' ريال عبر ' + top.n + ' طلباً فقط.',
     ].map(x => '<li>' + x + '</li>').join('');
   })();
